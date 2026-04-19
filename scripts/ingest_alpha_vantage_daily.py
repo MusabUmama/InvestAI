@@ -8,11 +8,13 @@ from decimal import Decimal
 from typing import Any, Iterable
 
 from dotenv import load_dotenv
+import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
 
 from packages.core.db import db_session
 from packages.db.models import PriceBar, Symbol
 from packages.domain.universe import DEFAULT_ETF_UNIVERSE, DEFAULT_ETF_SYMBOLS
+from packages.market_data.file_store import LocalPriceStore
 from packages.market_data.providers.alpha_vantage.client import AlphaVantageClient
 
 
@@ -141,6 +143,12 @@ def main() -> int:
     )
     parser.add_argument("--outputsize", choices=("compact", "full"), default="full")
     parser.add_argument(
+        "--store",
+        choices=("db", "file"),
+        default="db",
+        help="Where to store results: 'db' (Postgres) or 'file' (data/processed/price_bars/*.csv).",
+    )
+    parser.add_argument(
         "--sleep-seconds",
         type=float,
         default=float(os.getenv("ALPHAVANTAGE_SLEEP_SECONDS", "15")),
@@ -152,24 +160,55 @@ def main() -> int:
 
     client = AlphaVantageClient.from_env()
 
-    with db_session() as session:
-        _upsert_symbols(session, symbols)
-        session.commit()
-
+    if args.store == "file":
+        store = LocalPriceStore.default()
         for idx, sym in enumerate(symbols, start=1):
             payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
             if "Note" in payload:
-                # Rate limit note; pause longer and retry once.
                 time.sleep(max(args.sleep_seconds, 60.0))
                 payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
 
             series = _extract_time_series(payload)
-            upserted = _upsert_price_bars(session, sym, series)
-            session.commit()
-            print(f"[{idx}/{len(symbols)}] {sym}: upserted {upserted} bars")
+            rows: list[dict[str, Any]] = []
+            for day, values in series.items():
+                rows.append(
+                    {
+                        "date": day,
+                        "open": values.get("1. open"),
+                        "high": values.get("2. high"),
+                        "low": values.get("3. low"),
+                        "close": values.get("4. close"),
+                        "adjusted_close": values.get("5. adjusted close"),
+                        "volume": values.get("6. volume"),
+                        "dividend_amount": values.get("7. dividend amount"),
+                        "split_coefficient": values.get("8. split coefficient"),
+                    }
+                )
+            df = pd.DataFrame(rows)
+            path = store.write_symbol_bars(sym, df)
+            print(f"[{idx}/{len(symbols)}] {sym}: wrote {len(df)} bars -> {path}")
 
             if idx < len(symbols):
                 time.sleep(args.sleep_seconds)
+    else:
+        with db_session() as session:
+            _upsert_symbols(session, symbols)
+            session.commit()
+
+            for idx, sym in enumerate(symbols, start=1):
+                payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
+                if "Note" in payload:
+                    # Rate limit note; pause longer and retry once.
+                    time.sleep(max(args.sleep_seconds, 60.0))
+                    payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
+
+                series = _extract_time_series(payload)
+                upserted = _upsert_price_bars(session, sym, series)
+                session.commit()
+                print(f"[{idx}/{len(symbols)}] {sym}: upserted {upserted} bars")
+
+                if idx < len(symbols):
+                    time.sleep(args.sleep_seconds)
 
     return 0
 

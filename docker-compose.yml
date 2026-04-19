@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: investai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - investai_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d investai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/investai
+      ALPHAVANTAGE_API_KEY: ${ALPHAVANTAGE_API_KEY}
+      ALPHAVANTAGE_SLEEP_SECONDS: ${ALPHAVANTAGE_SLEEP_SECONDS:-15}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/investai
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "5000:5000"
+
+volumes:
+  investai_db:
+
