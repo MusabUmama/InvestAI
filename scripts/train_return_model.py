@@ -8,24 +8,11 @@ from dotenv import load_dotenv
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
 
 
-FEATURE_COLUMNS = [
-    "ret_1d",
-    "ret_5d",
-    "ret_21d",
-    "vol_21d",
-    "vol_63d",
-    "mom_63d",
-    "mom_126d",
-    "sma21_ratio",
-    "sma63_ratio",
-]
+from packages.ml.modeling import FEATURE_COLUMNS, prepare_monthly_dataset, train_return_model
 
 
 def time_split(df: pd.DataFrame, train_ratio: float = 0.8) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -48,15 +35,7 @@ def main() -> int:
     parser.add_argument("--out-dir", default="artifacts/return_model")
     args = parser.parse_args()
 
-    df = pd.read_csv(args.data)
-    df["date"] = pd.to_datetime(df["date"])
-    df["symbol"] = df["symbol"].astype(str)
-
-    # Basic cleanup
-    df = df.dropna(subset=["target_fwd_ret"])
-    for c in FEATURE_COLUMNS:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.dropna(subset=FEATURE_COLUMNS)
+    df = prepare_monthly_dataset(pd.read_csv(args.data))
 
     train, test = time_split(df, train_ratio=0.8)
 
@@ -65,21 +44,7 @@ def main() -> int:
     X_test = test[["symbol"] + FEATURE_COLUMNS]
     y_test = test["target_fwd_ret"].astype(float)
 
-    pre = ColumnTransformer(
-        transformers=[
-            ("sym", OneHotEncoder(handle_unknown="ignore"), ["symbol"]),
-            ("num", "passthrough", FEATURE_COLUMNS),
-        ]
-    )
-
-    model = Pipeline(
-        steps=[
-            ("pre", pre),
-            ("reg", Ridge(alpha=1.0, random_state=0)),
-        ]
-    )
-
-    model.fit(X_train, y_train)
+    model: Pipeline = train_return_model(train)
     pred = model.predict(X_test)
 
     metrics = {
@@ -102,4 +67,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

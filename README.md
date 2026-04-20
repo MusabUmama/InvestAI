@@ -80,3 +80,7 @@ If Docker/Postgres isn’t ready yet, you can continue with ML development using
 3. Train a baseline return model:
    - `python scripts/train_return_model.py`
    - Writes to `artifacts/return_model/`
+
+4. Run Sharpe-optimized recommendation + walk-forward backtest (file-based):
+   - `python scripts/recommend_and_backtest.py`
+   - Writes to `artifacts/backtests/latest/`
