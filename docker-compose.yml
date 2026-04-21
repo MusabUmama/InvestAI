@@ -37,6 +37,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/investai
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      INVESTAI_API_URL: http://api:8000
     depends_on:
       api:
         condition: service_started
@@ -45,4 +46,3 @@ services:
 
 volumes:
   investai_db:
-

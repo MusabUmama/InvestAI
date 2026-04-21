@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InvestAI</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="bg-light">
+    <main class="container py-5">
+      <div class="row justify-content-center">
+        <div class="col-lg-9">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <h1 class="h3 mb-0">InvestAI</h1>
+            <span class="badge text-bg-secondary">ETFs • Sharpe</span>
+          </div>
+
+          <div class="card shadow-sm mb-4">
+            <div class="card-body">
+              <form method="post" action="/recommend" class="row g-3">
+                <div class="col-12">
+                  <label for="symbols_csv" class="form-label">Symbols (comma-separated)</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="symbols_csv"
+                    name="symbols_csv"
+                    placeholder="VT,VTI,QQQ,VXUS,VWO,INDA,BND,IEF,TIP,GLD,VNQ"
+                  />
+                  <div class="form-text">
+                    Requires local price files in <code>data/processed/price_bars</code> or a running API with DB data.
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="include_equity" name="include_equity" />
+                    <label class="form-check-label" for="include_equity">Include equity curve</label>
+                  </div>
+                </div>
+
+                <div class="col-12">
+                  <button type="submit" class="btn btn-primary">Run Backtest</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {% if error %}
+          <div class="alert alert-danger">
+            <div class="fw-semibold">Error</div>
+            <div class="small">{{ error }}</div>
+          </div>
+          {% endif %}
+
+          {% if result %}
+          <div class="card shadow-sm mb-4">
+            <div class="card-body">
+              <h2 class="h5">Latest Weights</h2>
+              <div class="table-responsive">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th class="text-end">Weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for sym, w in result.latest_weights.items() %}
+                    <tr>
+                      <td>{{ sym }}</td>
+                      <td class="text-end">{{ "%.4f"|format(w) }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <h2 class="h5">Backtest Metrics</h2>
+              <div class="table-responsive">
+                <table class="table table-sm">
+                  <tbody>
+                    {% for k, v in result.metrics.items() %}
+                    <tr>
+                      <td class="text-muted">{{ k }}</td>
+                      <td class="text-end">{{ "%.6f"|format(v) if v is number else v }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% if result.equity_curve %}
+              <div class="text-muted small">
+                Equity curve points: {{ result.equity_curve|length }}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
+
