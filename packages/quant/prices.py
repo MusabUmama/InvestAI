@@ -25,7 +25,10 @@ class PricePanel:
 def _month_end_prices(daily: pd.DataFrame) -> pd.Series:
     df = daily.copy()
     df["date"] = pd.to_datetime(df["date"])
-    price_col = "adjusted_close" if "adjusted_close" in df.columns else "close"
+    if "adjusted_close" in df.columns and pd.to_numeric(df["adjusted_close"], errors="coerce").notna().any():
+        price_col = "adjusted_close"
+    else:
+        price_col = "close"
     df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
     df = df.dropna(subset=[price_col])
 
@@ -71,4 +74,3 @@ def load_month_end_price_panel(
         raise RuntimeError("Non-finite values in price panel after alignment")
 
     return PricePanel(prices=prices)
-

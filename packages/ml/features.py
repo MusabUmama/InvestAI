@@ -11,7 +11,10 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out = out.sort_values("date")
 
-    price_col = "adjusted_close" if "adjusted_close" in out.columns else "close"
+    if "adjusted_close" in out.columns and pd.to_numeric(out["adjusted_close"], errors="coerce").notna().any():
+        price_col = "adjusted_close"
+    else:
+        price_col = "close"
     if price_col not in out.columns:
         raise ValueError("Expected adjusted_close or close column")
 
@@ -44,7 +47,10 @@ def to_monthly_dataset(daily: pd.DataFrame, horizon_days: int = 21) -> pd.DataFr
     df = daily.copy()
     df = df.sort_values(["symbol", "date"])
 
-    price_col = "adjusted_close" if "adjusted_close" in df.columns else "close"
+    if "adjusted_close" in df.columns and pd.to_numeric(df["adjusted_close"], errors="coerce").notna().any():
+        price_col = "adjusted_close"
+    else:
+        price_col = "close"
     df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
 
     df["month"] = pd.to_datetime(df["date"]).dt.to_period("M")
@@ -59,4 +65,3 @@ def to_monthly_dataset(daily: pd.DataFrame, horizon_days: int = 21) -> pd.DataFr
 
     month_last = month_last.drop(columns=["month"])
     return month_last
-

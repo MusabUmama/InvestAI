@@ -70,7 +70,7 @@ Notes:
 If Docker/Postgres isn’t ready yet, you can continue with ML development using file-based storage:
 
 1. Ingest prices to CSV files:
-   - `python scripts/ingest_alpha_vantage_daily.py --store file --outputsize full`
+   - `python scripts/ingest_alpha_vantage_daily.py --store file --frequency monthly`
    - Writes to `data/processed/price_bars/*.csv`
 
 2. Build features + monthly training dataset:

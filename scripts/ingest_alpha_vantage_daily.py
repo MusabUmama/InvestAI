@@ -15,7 +15,11 @@ from packages.core.db import db_session
 from packages.db.models import PriceBar, Symbol
 from packages.domain.universe import DEFAULT_ETF_UNIVERSE, DEFAULT_ETF_SYMBOLS
 from packages.market_data.file_store import LocalPriceStore
-from packages.market_data.providers.alpha_vantage.client import AlphaVantageClient
+from packages.market_data.providers.alpha_vantage.client import (
+    AlphaVantageClient,
+    AlphaVantagePremiumError,
+    AlphaVantageRateLimitError,
+)
 
 
 def _parse_decimal(value: str | None) -> Decimal | None:
@@ -38,7 +42,7 @@ def _parse_int(value: str | None) -> int | None:
 
 def _extract_time_series(payload: dict[str, Any]) -> dict[str, dict[str, str]]:
     # Alpha Vantage uses one of these keys depending on endpoint.
-    for key in ("Time Series (Daily)", "Time Series (Daily Adjusted)"):
+    for key in ("Time Series (Daily)", "Time Series (Daily Adjusted)", "Monthly Time Series"):
         if key in payload and isinstance(payload[key], dict):
             return payload[key]
     keys = ", ".join(payload.keys())
@@ -103,7 +107,7 @@ def _upsert_price_bars(session, symbol: str, time_series: dict[str, dict[str, st
                 "low": _parse_decimal(values.get("3. low")) or Decimal("0"),
                 "close": _parse_decimal(values.get("4. close")) or Decimal("0"),
                 "adjusted_close": _parse_decimal(values.get("5. adjusted close")),
-                "volume": _parse_int(values.get("6. volume")),
+                "volume": _parse_int(values.get("6. volume") or values.get("5. volume")),
                 "dividend_amount": _parse_decimal(values.get("7. dividend amount")),
                 "split_coefficient": _parse_decimal(values.get("8. split coefficient")),
                 "source": "alphavantage",
@@ -135,11 +139,17 @@ def _upsert_price_bars(session, symbol: str, time_series: dict[str, dict[str, st
 def main() -> int:
     load_dotenv()
 
-    parser = argparse.ArgumentParser(description="Ingest daily adjusted ETF prices from Alpha Vantage into Postgres.")
+    parser = argparse.ArgumentParser(description="Ingest ETF price time series from Alpha Vantage (monthly works on free tier).")
     parser.add_argument(
         "--symbols",
         default="",
         help="Comma-separated symbols. Default: built-in ETF universe.",
+    )
+    parser.add_argument(
+        "--frequency",
+        choices=("monthly", "daily"),
+        default="monthly",
+        help="Alpha Vantage time series frequency. Free tier supports monthly full history; daily full is premium.",
     )
     parser.add_argument("--outputsize", choices=("compact", "full"), default="full")
     parser.add_argument(
@@ -160,13 +170,24 @@ def main() -> int:
 
     client = AlphaVantageClient.from_env()
 
+    def fetch_payload(sym: str) -> dict[str, Any]:
+        if args.frequency == "monthly":
+            return client.get_monthly(sym)
+        return client.get_daily(sym, outputsize=args.outputsize)
+
     if args.store == "file":
         store = LocalPriceStore.default()
         for idx, sym in enumerate(symbols, start=1):
-            payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
-            if "Note" in payload:
+            try:
+                payload = fetch_payload(sym)
+            except AlphaVantagePremiumError as e:
+                raise RuntimeError(
+                    f"Alpha Vantage premium restriction for {sym}: {e}. "
+                    f"Try `--frequency monthly` or `--frequency daily --outputsize compact`."
+                )
+            except AlphaVantageRateLimitError:
                 time.sleep(max(args.sleep_seconds, 60.0))
-                payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
+                payload = fetch_payload(sym)
 
             series = _extract_time_series(payload)
             rows: list[dict[str, Any]] = []
@@ -179,7 +200,7 @@ def main() -> int:
                         "low": values.get("3. low"),
                         "close": values.get("4. close"),
                         "adjusted_close": values.get("5. adjusted close"),
-                        "volume": values.get("6. volume"),
+                        "volume": values.get("6. volume") or values.get("5. volume"),
                         "dividend_amount": values.get("7. dividend amount"),
                         "split_coefficient": values.get("8. split coefficient"),
                     }
@@ -196,11 +217,16 @@ def main() -> int:
             session.commit()
 
             for idx, sym in enumerate(symbols, start=1):
-                payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
-                if "Note" in payload:
-                    # Rate limit note; pause longer and retry once.
+                try:
+                    payload = fetch_payload(sym)
+                except AlphaVantagePremiumError as e:
+                    raise RuntimeError(
+                        f"Alpha Vantage premium restriction for {sym}: {e}. "
+                        f"Try `--frequency monthly` or `--frequency daily --outputsize compact`."
+                    )
+                except AlphaVantageRateLimitError:
                     time.sleep(max(args.sleep_seconds, 60.0))
-                    payload = client.get_daily_adjusted(sym, outputsize=args.outputsize)
+                    payload = fetch_payload(sym)
 
                 series = _extract_time_series(payload)
                 upserted = _upsert_price_bars(session, sym, series)
