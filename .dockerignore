@@ -14,3 +14,6 @@ build/
 .env
 .env.*
 
+# Don’t bake local datasets/models into the image; use bind mounts in compose.
+data/
+artifacts/

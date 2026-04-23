@@ -20,9 +20,11 @@ build/
 .DS_Store
 Thumbs.db
 
+# Build logs
+build_*.log
+
 # Local datasets / artifacts
 data/raw/
 data/processed/
 data/features/
 artifacts/
-
