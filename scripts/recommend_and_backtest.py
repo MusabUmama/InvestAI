@@ -86,7 +86,7 @@ def main() -> int:
                 # Not enough training data; fall back to simple momentum proxy.
                 rows = monthly_feature_df[monthly_feature_df["date"].dt.date == rebalance_date].copy()
                 rows = rows.set_index("symbol").reindex(sym_list).reset_index()
-                return np.nan_to_num(rows["mom_63d"].to_numpy(dtype=float), nan=0.0)
+                return np.nan_to_num(rows["mom_12p"].to_numpy(dtype=float), nan=0.0)
             model = train_return_model(train_df)
             rows = monthly_feature_df[monthly_feature_df["date"].dt.date == rebalance_date].copy()
             rows = rows.set_index("symbol").reindex(sym_list).reset_index()
@@ -118,4 +118,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

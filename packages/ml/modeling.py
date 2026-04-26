@@ -9,15 +9,16 @@ from sklearn.preprocessing import OneHotEncoder
 
 
 FEATURE_COLUMNS = [
-    "ret_1d",
-    "ret_5d",
-    "ret_21d",
-    "vol_21d",
-    "vol_63d",
-    "mom_63d",
-    "mom_126d",
-    "sma21_ratio",
-    "sma63_ratio",
+    "ret_1p",
+    "ret_3p",
+    "ret_6p",
+    "ret_12p",
+    "vol_12p",
+    "vol_36p",
+    "mom_12p",
+    "mom_24p",
+    "sma12_ratio",
+    "sma36_ratio",
 ]
 
 
@@ -62,4 +63,3 @@ def predict_expected_returns(model: Pipeline, feature_rows: pd.DataFrame) -> np.
     X = X.fillna(0.0)
     pred = model.predict(X)
     return np.asarray(pred, dtype=float)
-

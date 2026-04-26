@@ -5,7 +5,8 @@ import pandas as pd
 
 def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Input: daily bars for a single symbol with columns at least: date, adjusted_close (or close)
+    Input: bars for a single symbol with columns at least: date, adjusted_close (or close).
+    With our current Alpha Vantage free-tier path, bars are typically monthly.
     Output: same rows with basic technical features.
     """
     out = df.copy()
@@ -19,21 +20,23 @@ def add_basic_features(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Expected adjusted_close or close column")
 
     price = pd.to_numeric(out[price_col], errors="coerce")
-    out["ret_1d"] = price.pct_change(1)
-    out["ret_5d"] = price.pct_change(5)
-    out["ret_21d"] = price.pct_change(21)
+    # Periods are "rows" (monthly if using TIME_SERIES_MONTHLY).
+    out["ret_1p"] = price.pct_change(1)
+    out["ret_3p"] = price.pct_change(3)
+    out["ret_6p"] = price.pct_change(6)
+    out["ret_12p"] = price.pct_change(12)
 
-    out["vol_21d"] = out["ret_1d"].rolling(21).std()
-    out["vol_63d"] = out["ret_1d"].rolling(63).std()
+    out["vol_12p"] = out["ret_1p"].rolling(12).std()
+    out["vol_36p"] = out["ret_1p"].rolling(36).std()
 
-    out["mom_63d"] = price.pct_change(63)
-    out["mom_126d"] = price.pct_change(126)
+    out["mom_12p"] = price.pct_change(12)
+    out["mom_24p"] = price.pct_change(24)
 
     # Simple moving average ratios (trend proxy)
-    sma_21 = price.rolling(21).mean()
-    sma_63 = price.rolling(63).mean()
-    out["sma21_ratio"] = price / sma_21 - 1.0
-    out["sma63_ratio"] = price / sma_63 - 1.0
+    sma_12 = price.rolling(12).mean()
+    sma_36 = price.rolling(36).mean()
+    out["sma12_ratio"] = price / sma_12 - 1.0
+    out["sma36_ratio"] = price / sma_36 - 1.0
 
     return out
 
@@ -42,7 +45,7 @@ def to_monthly_dataset(daily: pd.DataFrame, horizon_days: int = 21) -> pd.DataFr
     """
     Converts daily features to a monthly-ish supervised dataset:
     - uses the last available row per calendar month as the feature row
-    - target is forward return over `horizon_days` on adjusted_close
+    - target is forward return to the next feature row (next month)
     """
     df = daily.copy()
     df = df.sort_values(["symbol", "date"])
@@ -61,7 +64,7 @@ def to_monthly_dataset(daily: pd.DataFrame, horizon_days: int = 21) -> pd.DataFr
         month_last.groupby("symbol")[price_col].shift(-1) / month_last[price_col] - 1.0
     )
     # Also include a volatility-like target for later models
-    month_last["target_fwd_vol"] = month_last.groupby("symbol")["ret_1d"].shift(-1).rolling(3).std()
+    month_last["target_fwd_vol"] = month_last.groupby("symbol")["ret_1p"].shift(-1).rolling(3).std()
 
     month_last = month_last.drop(columns=["month"])
     return month_last

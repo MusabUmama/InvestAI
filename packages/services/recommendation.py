@@ -81,9 +81,13 @@ def run_recommendation_backtest_from_files(
         model = joblib.load(model_file)
         expected_return_fn = _expected_return_fn_from_model(model=model, monthly_feature_df=monthly_feature_df)
     else:
-        # Lightweight fallback: train once on all available data (still time-safe for backtest if data already ended).
-        model = train_return_model(monthly_feature_df)
-        expected_return_fn = _expected_return_fn_from_model(model=model, monthly_feature_df=monthly_feature_df)
+        # No model available: use a simple, non-leaky momentum proxy at each rebalance date.
+        def expected_return_fn(rebalance_date: date, symbols_for_date: list[str]) -> np.ndarray:
+            rows = monthly_feature_df[monthly_feature_df["date"].dt.date == rebalance_date].copy()
+            rows = rows.set_index("symbol").reindex(symbols_for_date).reset_index()
+            if "mom_12p" not in rows.columns:
+                return np.zeros(len(symbols_for_date), dtype=float)
+            return np.nan_to_num(rows["mom_12p"].to_numpy(dtype=float), nan=0.0)
 
     bt: BacktestResult = walk_forward_monthly_backtest(
         month_end_prices=panel.prices,
