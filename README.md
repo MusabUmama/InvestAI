@@ -84,3 +84,15 @@ If Docker/Postgres isn’t ready yet, you can continue with ML development using
 4. Run Sharpe-optimized recommendation + walk-forward backtest (file-based):
    - `python scripts/recommend_and_backtest.py`
    - Writes to `artifacts/backtests/latest/`
+
+## Run History + Explanations (DB Path)
+
+With Docker Compose running and migrations applied, the API persists each backtest run and can generate an LLM explanation:
+
+- Create a run: `POST /recommendations/backtest` (returns `run_id`)
+- List runs: `GET /recommendations/runs`
+- Generate explanation: `POST /recommendations/runs/{run_id}/explain`
+- Fetch latest explanation: `GET /recommendations/runs/{run_id}/explanation`
+
+OpenRouter model selection:
+- Set `OPENROUTER_MODEL` (optional). Default: `openrouter/free`

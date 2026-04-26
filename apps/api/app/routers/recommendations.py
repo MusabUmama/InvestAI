@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import ProgrammingError
 
 from packages.core.db import db_session, get_database_url
-from packages.db.models import RecommendationRun
+from packages.db.models import RecommendationExplanation, RecommendationRun
+from packages.services.explanations import generate_recommendation_explanation
 from packages.services.recommendation import run_recommendation_backtest_from_files
 
 
@@ -128,4 +129,138 @@ def get_run(run_id: str) -> RunSummary:
             symbols=run.symbols,
             metrics=run.metrics,
             latest_weights=run.latest_weights,
+        )
+
+
+class ExplanationResponse(BaseModel):
+    id: str
+    run_id: str
+    created_at: str
+    provider: str
+    model: str
+    prompt_version: str
+    content_type: str
+    content: str
+
+
+@router.get("/runs/{run_id}/explanation", response_model=ExplanationResponse)
+def get_explanation(run_id: str) -> ExplanationResponse:
+    try:
+        _ = get_database_url()
+    except Exception:
+        raise HTTPException(status_code=400, detail="DATABASE_URL is not configured")
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+
+    with db_session() as session:
+        try:
+            expl = (
+                session.query(RecommendationExplanation)
+                .filter(RecommendationExplanation.run_id == run_uuid)
+                .order_by(RecommendationExplanation.created_at.desc())
+                .first()
+            )
+        except ProgrammingError:
+            raise HTTPException(status_code=503, detail="Database migrations not applied")
+        if expl is None:
+            raise HTTPException(status_code=404, detail="Explanation not found")
+        return ExplanationResponse(
+            id=str(expl.id),
+            run_id=str(expl.run_id),
+            created_at=expl.created_at.isoformat(),
+            provider=expl.provider,
+            model=expl.model,
+            prompt_version=expl.prompt_version,
+            content_type=expl.content_type,
+            content=expl.content,
+        )
+
+
+class ExplainRequest(BaseModel):
+    force: bool = False
+
+
+@router.post("/runs/{run_id}/explain", response_model=ExplanationResponse)
+def explain_run(run_id: str, req: ExplainRequest) -> ExplanationResponse:
+    try:
+        _ = get_database_url()
+    except Exception:
+        raise HTTPException(status_code=400, detail="DATABASE_URL is not configured")
+
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid run_id")
+
+    with db_session() as session:
+        try:
+            run = session.get(RecommendationRun, run_uuid)
+        except ProgrammingError:
+            raise HTTPException(status_code=503, detail="Database migrations not applied")
+
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        if not req.force:
+            existing = (
+                session.query(RecommendationExplanation)
+                .filter(RecommendationExplanation.run_id == run_uuid)
+                .order_by(RecommendationExplanation.created_at.desc())
+                .first()
+            )
+            if existing is not None:
+                return ExplanationResponse(
+                    id=str(existing.id),
+                    run_id=str(existing.run_id),
+                    created_at=existing.created_at.isoformat(),
+                    provider=existing.provider,
+                    model=existing.model,
+                    prompt_version=existing.prompt_version,
+                    content_type=existing.content_type,
+                    content=existing.content,
+                )
+
+        run_payload = {
+            "id": str(run.id),
+            "created_at": run.created_at.isoformat(),
+            "data_source": run.data_source,
+            "data_frequency": run.data_frequency,
+            "model_path": run.model_path,
+            "request": run.request,
+            "symbols": run.symbols,
+            "metrics": run.metrics,
+            "latest_weights": run.latest_weights,
+        }
+
+        try:
+            generated = generate_recommendation_explanation(run_payload=run_payload)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        expl = RecommendationExplanation(
+            run_id=run.id,
+            provider=generated.provider,
+            model=generated.model,
+            prompt_version=generated.prompt_version,
+            content_type=generated.content_type,
+            content=generated.content,
+            request=generated.request,
+            response=generated.response,
+        )
+        session.add(expl)
+        session.commit()
+        session.refresh(expl)
+
+        return ExplanationResponse(
+            id=str(expl.id),
+            run_id=str(expl.run_id),
+            created_at=expl.created_at.isoformat(),
+            provider=expl.provider,
+            model=expl.model,
+            prompt_version=expl.prompt_version,
+            content_type=expl.content_type,
+            content=expl.content,
         )
