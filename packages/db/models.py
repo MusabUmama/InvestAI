@@ -62,6 +62,7 @@ class RecommendationRun(Base):
     symbols: Mapped[list] = mapped_column(JSONB, nullable=False)
     metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
     latest_weights: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    benchmarks: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     backtest_points: Mapped[list["RecommendationBacktestPoint"]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
@@ -123,3 +124,22 @@ class RecommendationExplanation(Base):
     response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     run: Mapped[RecommendationRun] = relationship(back_populates="explanations")
+
+
+class MlModel(Base):
+    __tablename__ = "ml_models"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    task: Mapped[str] = mapped_column(String(64), nullable=False)
+    data_frequency: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
+    feature_schema: Mapped[str] = mapped_column(String(32), nullable=False, default="monthly_v2")
+
+    symbols: Mapped[list] = mapped_column(JSONB, nullable=False)
+    train_params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    artifact_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)

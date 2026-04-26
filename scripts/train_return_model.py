@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from sklearn.pipeline import Pipeline
 
 
 from packages.ml.modeling import FEATURE_COLUMNS, prepare_monthly_dataset, train_return_model
+from packages.core.db import db_session, get_database_url
+from packages.db.models import MlModel
 
 
 def time_split(df: pd.DataFrame, train_ratio: float = 0.8) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -64,8 +67,35 @@ def main() -> int:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, out_dir / "model.joblib")
+    model_path = out_dir / "model.joblib"
+    joblib.dump(model, model_path)
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+    # Compute artifact hash for registry
+    sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
+
+    # Best-effort: write to DB model registry if available.
+    try:
+        _ = get_database_url()
+        with db_session() as session:
+            # Infer symbols from dataset
+            symbols = sorted(df["symbol"].unique().tolist())
+            reg = MlModel(
+                name="return_model",
+                task="predict_next_month_return",
+                data_frequency="monthly",
+                feature_schema=str(df["feature_schema"].iloc[0]) if "feature_schema" in df.columns else "monthly_v2",
+                symbols=symbols,
+                train_params={"model": "Ridge", "alpha": 1.0, "train_ratio": 0.8},
+                metrics=metrics,
+                artifact_path=str(model_path).replace("\\", "/"),
+                artifact_sha256=sha256,
+            )
+            session.add(reg)
+            session.commit()
+            print(f"Registered model in DB: {reg.id}")
+    except Exception:
+        pass
 
     print(json.dumps(metrics, indent=2))
     return 0

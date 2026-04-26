@@ -3,16 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+import hashlib
 
 import joblib
 import numpy as np
 import pandas as pd
 
 from packages.core.db import db_session, get_database_url
-from packages.db.models import RecommendationBacktestPoint, RecommendationRun, RecommendationWeightHistory
+from packages.db.models import MlModel, RecommendationBacktestPoint, RecommendationRun, RecommendationWeightHistory
 from packages.domain.constraints import DEFAULT_CONSTRAINTS
 from packages.domain.universe import DEFAULT_ETF_SYMBOLS
+from packages.market_data.db_store import DbPriceStore
 from packages.market_data.file_store import LocalPriceStore
+from packages.market_data.store import PriceStore
 from packages.ml.features import add_basic_features, to_monthly_dataset
 from packages.ml.modeling import prepare_monthly_dataset, predict_expected_returns, train_return_model
 from packages.quant.backtest import BacktestResult, walk_forward_monthly_backtest
@@ -24,12 +27,13 @@ class RecommendationBacktestResponse:
     run_id: str | None
     symbols: list[str]
     metrics: dict[str, float]
+    benchmarks: dict[str, dict[str, float]]
     latest_weights: dict[str, float]
     equity_curve: list[dict[str, float | str]] | None
     weight_history: list[dict[str, float | str]] | None
 
 
-def _build_monthly_feature_rows(store: LocalPriceStore, symbols: list[str]) -> pd.DataFrame:
+def _build_monthly_feature_rows(store: PriceStore, symbols: list[str]) -> pd.DataFrame:
     parts: list[pd.DataFrame] = []
     for sym in symbols:
         daily = store.read_symbol_bars(sym)
@@ -59,25 +63,32 @@ def _expected_return_fn_from_model(
 def run_recommendation_backtest_from_files(
     *,
     symbols: list[str] | None = None,
+    data_source: str = "file",
     model_path: str = "artifacts/return_model/model.joblib",
     include_equity: bool = False,
     include_weight_history: bool = False,
     max_weight: float = DEFAULT_CONSTRAINTS.max_weight,
     cov_lookback_months: int = 36,
     rf_annual: float = 0.0,
+    transaction_cost_bps: float = 10.0,
 ) -> RecommendationBacktestResponse:
     symbols = list(DEFAULT_ETF_SYMBOLS) if not symbols else [s.strip().upper() for s in symbols if s.strip()]
     if not symbols:
         raise ValueError("No symbols provided")
 
-    store = LocalPriceStore.default()
+    if data_source == "db":
+        store: PriceStore = DbPriceStore()
+    else:
+        store = LocalPriceStore.default()
     panel = load_month_end_price_panel(store, symbols, min_common_months=cov_lookback_months + 12)
 
     monthly_feature_df = _build_monthly_feature_rows(store, symbols)
     monthly_feature_df = prepare_monthly_dataset(monthly_feature_df)
 
     model_file = Path(model_path)
+    model_sha256: str | None = None
     if model_file.exists():
+        model_sha256 = hashlib.sha256(model_file.read_bytes()).hexdigest()
         model = joblib.load(model_file)
         expected_return_fn = _expected_return_fn_from_model(model=model, monthly_feature_df=monthly_feature_df)
     else:
@@ -95,6 +106,7 @@ def run_recommendation_backtest_from_files(
         max_weight=float(max_weight),
         cov_lookback_months=int(cov_lookback_months),
         rf_annual=float(rf_annual),
+        transaction_cost_bps=float(transaction_cost_bps),
     )
 
     latest_weights: dict[str, float] = {}
@@ -127,20 +139,35 @@ def run_recommendation_backtest_from_files(
     try:
         _ = get_database_url()
         with db_session() as session:
+            model_registry_id: str | None = None
+            if model_sha256 is not None:
+                reg = (
+                    session.query(MlModel)
+                    .filter(MlModel.artifact_sha256 == model_sha256)
+                    .order_by(MlModel.created_at.desc())
+                    .first()
+                )
+                if reg is not None:
+                    model_registry_id = str(reg.id)
             run = RecommendationRun(
-                data_source="file",
+                data_source=str(data_source),
                 data_frequency="monthly",
                 model_path=model_path,
                 request={
+                    "data_source": str(data_source),
                     "max_weight": float(max_weight),
                     "cov_lookback_months": int(cov_lookback_months),
                     "rf_annual": float(rf_annual),
+                    "transaction_cost_bps": float(transaction_cost_bps),
                     "include_equity": bool(include_equity),
                     "include_weight_history": bool(include_weight_history),
+                    "model_sha256": model_sha256,
+                    "model_registry_id": model_registry_id,
                 },
                 symbols=symbols,
                 metrics={k: float(v) for k, v in bt.metrics.items()},
                 latest_weights=latest_weights,
+                benchmarks=bt.benchmarks,
             )
             session.add(run)
             session.flush()
@@ -178,6 +205,7 @@ def run_recommendation_backtest_from_files(
         run_id=run_id,
         symbols=symbols,
         metrics={k: float(v) for k, v in bt.metrics.items()},
+        benchmarks=bt.benchmarks,
         latest_weights=latest_weights,
         equity_curve=equity_curve,
         weight_history=weight_history,

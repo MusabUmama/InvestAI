@@ -2,14 +2,52 @@ from __future__ import annotations
 
 import os
 
+import bleach
 import httpx
 from flask import Flask
-from flask import render_template, request
+from flask import redirect, render_template, request
+import markdown as md
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+    @app.template_filter("render_markdown")
+    def render_markdown(text: str) -> str:
+        html = md.markdown(text or "", extensions=["fenced_code", "tables"])
+        return bleach.clean(
+            html,
+            tags=[
+                "p",
+                "pre",
+                "code",
+                "strong",
+                "em",
+                "ul",
+                "ol",
+                "li",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "blockquote",
+                "br",
+                "hr",
+                "table",
+                "thead",
+                "tbody",
+                "tr",
+                "th",
+                "td",
+                "a",
+            ],
+            attributes={"a": ["href", "title", "rel", "target"]},
+            protocols=["http", "https"],
+            strip=True,
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -38,6 +76,8 @@ def create_app() -> Flask:
             resp = httpx.post(f"{api_url}/recommendations/backtest", json=payload, timeout=60.0)
             resp.raise_for_status()
             result = resp.json()
+            if result and result.get("run_id"):
+                return redirect(f"/runs/{result['run_id']}")
             return render_template("recommend.html", result=result, error=None)
         except Exception as e:
             return render_template("recommend.html", result=None, error=str(e))
@@ -65,6 +105,14 @@ def create_app() -> Flask:
         except Exception as e:
             return render_template("run_detail.html", run=None, explanation=None, error=str(e), run_id=run_id)
 
+        series = None
+        try:
+            s_resp = httpx.get(f"{api_url}/recommendations/runs/{run_id}/series", timeout=20.0)
+            if s_resp.status_code == 200:
+                series = s_resp.json()
+        except Exception:
+            series = None
+
         explanation = None
         try:
             expl_resp = httpx.get(f"{api_url}/recommendations/runs/{run_id}/explanation", timeout=20.0)
@@ -73,7 +121,14 @@ def create_app() -> Flask:
         except Exception:
             explanation = None
 
-        return render_template("run_detail.html", run=run_data, explanation=explanation, error=None, run_id=run_id)
+        return render_template(
+            "run_detail.html",
+            run=run_data,
+            series=series,
+            explanation=explanation,
+            error=None,
+            run_id=run_id,
+        )
 
     @app.post("/runs/<run_id>/explain")
     def run_explain(run_id: str) -> str:

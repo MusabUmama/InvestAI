@@ -7,7 +7,7 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
-from packages.market_data.file_store import LocalPriceStore
+from packages.market_data.store import PriceStore
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ def _month_end_prices(daily: pd.DataFrame) -> pd.Series:
 
 
 def load_month_end_price_panel(
-    store: LocalPriceStore,
+    store: PriceStore,
     symbols: Iterable[str],
     *,
     min_common_months: int = 36,

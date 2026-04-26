@@ -80,6 +80,79 @@
         <div class="col-12">
           <div class="card shadow-sm">
             <div class="card-body">
+              <h2 class="h6">Benchmarks</h2>
+              {% if run.benchmarks %}
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th class="text-end">Sharpe</th>
+                      <th class="text-end">CAGR</th>
+                      <th class="text-end">Max DD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for name, bm in run.benchmarks.items() %}
+                    <tr>
+                      <td class="small">{{ name }}</td>
+                      <td class="text-end">{{ "%.3f"|format(bm.sharpe_annual) if bm and bm.sharpe_annual is not none else "" }}</td>
+                      <td class="text-end">{{ "%.3f"|format(bm.cagr) if bm and bm.cagr is not none else "" }}</td>
+                      <td class="text-end">{{ "%.3f"|format(bm.max_drawdown) if bm and bm.max_drawdown is not none else "" }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% else %}
+              <div class="text-muted">No benchmark metrics stored for this run yet.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-body">
+              <h2 class="h6">Equity Curve</h2>
+              {% if series and series.equity_curve and series.equity_curve|length > 0 %}
+              <canvas id="equityChart" height="100"></canvas>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+              <script>
+                const points = {{ series.equity_curve|tojson }};
+                const labels = points.map(p => p.date);
+                const values = points.map(p => p.portfolio_value);
+                const ctx = document.getElementById("equityChart");
+                new Chart(ctx, {
+                  type: "line",
+                  data: {
+                    labels,
+                    datasets: [{
+                      label: "Portfolio Value",
+                      data: values,
+                      borderWidth: 2,
+                      tension: 0.2,
+                      pointRadius: 0
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    scales: {
+                      x: { ticks: { maxTicksLimit: 8 } }
+                    }
+                  }
+                });
+              </script>
+              {% else %}
+              <div class="text-muted">No equity curve available.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-body">
               <div class="d-flex align-items-center justify-content-between">
                 <h2 class="h6 mb-0">Explanation (OpenRouter)</h2>
                 <form method="post" action="/runs/{{ run_id }}/explain" class="d-flex align-items-center gap-2">
@@ -96,7 +169,7 @@
                 <div class="text-muted small mb-2">
                   {{ explanation.provider }} / {{ explanation.model }} • {{ explanation.created_at }}
                 </div>
-                <pre class="bg-light border rounded p-3" style="white-space: pre-wrap;">{{ explanation.content }}</pre>
+                <div class="bg-light border rounded p-3">{{ explanation.content | render_markdown | safe }}</div>
               </div>
               {% else %}
               <div class="text-muted mt-3">No explanation generated yet.</div>
@@ -109,4 +182,3 @@
     </main>
   </body>
 </html>
-

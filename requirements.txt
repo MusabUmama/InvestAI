@@ -11,3 +11,5 @@ scikit-learn>=1.5.1,<2
 sqlalchemy>=2.0.32,<3
 tenacity>=9.0.0,<10
 uvicorn[standard]>=0.30.6,<1
+markdown>=3.6,<4
+bleach>=6.1.0,<7
