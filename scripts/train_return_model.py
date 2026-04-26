@@ -36,6 +36,12 @@ def main() -> int:
     args = parser.parse_args()
 
     df = prepare_monthly_dataset(pd.read_csv(args.data))
+    missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
+    if missing:
+        raise RuntimeError(
+            "monthly_dataset.csv is missing expected feature columns. "
+            f"Missing: {missing}. Re-run scripts/build_features.py."
+        )
 
     train, test = time_split(df, train_ratio=0.8)
 

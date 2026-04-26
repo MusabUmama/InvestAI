@@ -39,6 +39,7 @@ def main() -> int:
         monthly_parts.append(monthly)
 
     merged = pd.concat(monthly_parts, ignore_index=True)
+    merged["feature_schema"] = "monthly_v2"
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,4 +50,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
