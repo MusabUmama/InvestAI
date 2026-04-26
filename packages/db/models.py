@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
+import uuid
+
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -44,3 +47,54 @@ class PriceBar(Base):
 
     symbol_rel: Mapped[Symbol] = relationship(back_populates="price_bars")
 
+
+class RecommendationRun(Base):
+    __tablename__ = "recommendation_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    data_source: Mapped[str] = mapped_column(String(16), nullable=False, default="file")
+    data_frequency: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
+    model_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    request: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    symbols: Mapped[list] = mapped_column(JSONB, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    latest_weights: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    backtest_points: Mapped[list["RecommendationBacktestPoint"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+    weight_history: Mapped[list["RecommendationWeightHistory"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class RecommendationBacktestPoint(Base):
+    __tablename__ = "recommendation_backtest_points"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("recommendation_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    portfolio_value: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    portfolio_return: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+
+    run: Mapped[RecommendationRun] = relationship(back_populates="backtest_points")
+
+
+class RecommendationWeightHistory(Base):
+    __tablename__ = "recommendation_weight_history"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("recommendation_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    rebalance_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    weights: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    run: Mapped[RecommendationRun] = relationship(back_populates="weight_history")

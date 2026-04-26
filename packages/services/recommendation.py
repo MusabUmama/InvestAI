@@ -8,6 +8,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from packages.core.db import db_session, get_database_url
+from packages.db.models import RecommendationBacktestPoint, RecommendationRun, RecommendationWeightHistory
 from packages.domain.constraints import DEFAULT_CONSTRAINTS
 from packages.domain.universe import DEFAULT_ETF_SYMBOLS
 from packages.market_data.file_store import LocalPriceStore
@@ -19,6 +21,7 @@ from packages.quant.prices import load_month_end_price_panel
 
 @dataclass(frozen=True)
 class RecommendationBacktestResponse:
+    run_id: str | None
     symbols: list[str]
     metrics: dict[str, float]
     latest_weights: dict[str, float]
@@ -115,11 +118,63 @@ def run_recommendation_backtest_from_files(
                 item[sym] = float(w)
             weight_history.append(item)
 
+    run_id: str | None = None
+    # Persist the run if DB is available (Docker Compose path).
+    try:
+        _ = get_database_url()
+        with db_session() as session:
+            run = RecommendationRun(
+                data_source="file",
+                data_frequency="monthly",
+                model_path=model_path,
+                request={
+                    "max_weight": float(max_weight),
+                    "cov_lookback_months": int(cov_lookback_months),
+                    "rf_annual": float(rf_annual),
+                    "include_equity": bool(include_equity),
+                    "include_weight_history": bool(include_weight_history),
+                },
+                symbols=symbols,
+                metrics={k: float(v) for k, v in bt.metrics.items()},
+                latest_weights=latest_weights,
+            )
+            session.add(run)
+            session.flush()
+            run_id = str(run.id)
+
+            # Always persist the equity curve + weight history for replay/debugging.
+            points = []
+            for _, row in bt.equity_curve.iterrows():
+                points.append(
+                    RecommendationBacktestPoint(
+                        run_id=run.id,
+                        date=pd.to_datetime(row["date"]).date(),
+                        portfolio_value=row["portfolio_value"],
+                        portfolio_return=row["portfolio_return"],
+                    )
+                )
+            session.add_all(points)
+
+            hist_rows = []
+            for reb_date, row in bt.weights.iterrows():
+                hist_rows.append(
+                    RecommendationWeightHistory(
+                        run_id=run.id,
+                        rebalance_date=pd.to_datetime(reb_date).date(),
+                        weights={sym: float(w) for sym, w in row.items()},
+                    )
+                )
+            session.add_all(hist_rows)
+            session.commit()
+    except Exception:
+        # Persistence is best-effort; the API result should still be returned.
+        run_id = run_id
+
     return RecommendationBacktestResponse(
+        run_id=run_id,
         symbols=symbols,
         metrics={k: float(v) for k, v in bt.metrics.items()},
         latest_weights=latest_weights,
         equity_curve=equity_curve,
         weight_history=weight_history,
     )
-

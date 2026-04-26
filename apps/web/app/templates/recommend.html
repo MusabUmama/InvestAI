@@ -60,6 +60,11 @@
           <div class="card shadow-sm mb-4">
             <div class="card-body">
               <h2 class="h5">Latest Weights</h2>
+              {% if result.run_id %}
+              <div class="text-muted small mb-2">
+                Run ID: <code>{{ result.run_id }}</code>
+              </div>
+              {% endif %}
               <div class="table-responsive">
                 <table class="table table-sm">
                   <thead>
@@ -109,4 +114,3 @@
     </main>
   </body>
 </html>
-
