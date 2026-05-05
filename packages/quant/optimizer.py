@@ -14,7 +14,7 @@ class OptimizationResult:
     chosen_lambda: float
 
 
-def _project_capped_simplex(v: np.ndarray, *, z: float, upper: float, iters: int = 80) -> np.ndarray:
+def _project_capped_simplex(v: np.ndarray, *, z: float, upper: float, iters: int = 40) -> np.ndarray:
     """
     Euclidean projection onto { w | sum(w)=z, 0<=w<=upper } using bisection on the Lagrange multiplier.
     KKT gives w_i = clip(v_i - lambda, 0, upper) with sum constraint.
@@ -62,8 +62,8 @@ def maximize_sharpe_via_mean_variance_sweep(
     rf: float = 0.0,
     max_weight: float = 0.35,
     lambdas: np.ndarray | None = None,
-    iters: int = 400,
-    tol: float = 1e-8,
+    iters: int = 100,
+    tol: float = 1e-6,
 ) -> OptimizationResult:
     """
     Practical approach for constrained Sharpe: solve a grid of mean-variance problems
@@ -76,7 +76,9 @@ def maximize_sharpe_via_mean_variance_sweep(
         raise ValueError("sigma must be square (n,n)")
 
     if lambdas is None:
-        lambdas = np.logspace(-3, 3, 25)
+        # A tighter default grid keeps the API responsive while preserving
+        # enough breadth to find a strong constrained Sharpe solution.
+        lambdas = np.logspace(-2, 2, 11)
 
     # Start from equal weights, projected to bounds.
     w0 = np.full(n, 1.0 / n, dtype=float)
@@ -88,27 +90,25 @@ def maximize_sharpe_via_mean_variance_sweep(
     eig_max = float(np.linalg.eigvalsh(sigma).max())
     eig_max = max(eig_max, 1e-12)
 
+    w_start = w0.copy()
     for lam in lambdas:
         lam = float(lam)
-        w = w0.copy()
+        w = w_start.copy()
         # Lipschitz for grad of (lam * w^T Sigma w) is 2*lam*eig_max
         step = 1.0 / (2.0 * lam * eig_max + 1.0) if lam > 0 else 0.1
 
-        prev_obj = None
         for _ in range(iters):
             grad = -mu + 2.0 * lam * (sigma @ w)
             w_new = _project_capped_simplex(w - step * grad, z=1.0, upper=max_weight)
-
-            obj = float(-mu @ w_new + lam * (w_new @ sigma @ w_new))
-            if prev_obj is not None and abs(prev_obj - obj) < tol:
+            if float(np.max(np.abs(w_new - w))) < tol:
                 w = w_new
                 break
-            prev_obj = obj
             w = w_new
+
+        w_start = w
 
         sharpe, mu_p, sigma_p = _portfolio_stats(mu, sigma, w, rf)
         if sharpe > best.sharpe:
             best = OptimizationResult(weights=w, sharpe=sharpe, mu_p=mu_p, sigma_p=sigma_p, chosen_lambda=lam)
 
     return best
-
